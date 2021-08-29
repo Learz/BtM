@@ -20,7 +20,7 @@ func _init(attached_node: Node):
 	PhysicsServer.body_set_collision_mask(_body_rid, 1)
 
 	# TODO This is an attempt to workaround https://github.com/godotengine/godot/issues/24390
-	PhysicsServer.body_set_ray_pickable(_body_rid, false)
+	PhysicsServer.body_set_ray_pickable(_body_rid, true)
 
 	# TODO This is a workaround to https://github.com/godotengine/godot/issues/25304
 	PhysicsServer.shape_set_data(_shape_rid, {

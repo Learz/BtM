@@ -1,0 +1,194 @@
+[gd_scene load_steps=5 format=2]
+
+[ext_resource path="res://Assets/Test/backpack.gd" type="Script" id=1]
+[ext_resource path="res://Assets/Test/backpack.dae" type="PackedScene" id=2]
+[ext_resource path="res://icon.png" type="Texture" id=3]
+
+[sub_resource type="BoxShape" id=1]
+extents = Vector3( 0.25, 0.2, 0.1 )
+
+[node name="backpack" instance=ExtResource( 2 )]
+script = ExtResource( 1 )
+
+[node name="Backpack" parent="." index="0"]
+transform = Transform( 0.6, 2.61039e-17, 2.58238e-18, -2.61039e-17, 0.6, -1.03318e-41, -2.58238e-18, -1.1235e-34, 0.6, 1.14553e-17, -0.261543, -0.289512 )
+
+[node name="StaticBody" type="StaticBody" parent="Backpack/Skeleton/Plane" index="0"]
+input_capture_on_drag = true
+
+[node name="CollisionShape" type="CollisionShape" parent="Backpack/Skeleton/Plane/StaticBody" index="0"]
+transform = Transform( 1, -4.96308e-23, -8.27181e-25, 4.96308e-23, 1, -1.49233e-40, 8.27181e-25, -1.49233e-40, 1, -5.11356e-17, 1.14787, 0.277826 )
+shape = SubResource( 1 )
+
+[node name="InvMask" type="Control" parent="Backpack" index="1"]
+anchor_left = 0.5
+anchor_right = 0.5
+margin_left = -170.0
+margin_top = 800.0
+margin_right = 170.0
+margin_bottom = 1070.0
+grow_horizontal = 0
+rect_clip_content = true
+__meta__ = {
+"_edit_use_anchors_": false
+}
+
+[node name="InventoryGridContainer" type="GridContainer" parent="Backpack/InvMask" index="0"]
+anchor_left = 0.5
+anchor_right = 0.5
+margin_left = -170.0
+margin_top = 40.0
+margin_right = 170.0
+margin_bottom = 270.0
+grow_horizontal = 0
+grow_vertical = 0
+rect_min_size = Vector2( 340, 200 )
+columns = 5
+__meta__ = {
+"_edit_use_anchors_": false
+}
+
+[node name="TextureRect" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="0"]
+margin_right = 64.0
+margin_bottom = 64.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect2" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="1"]
+margin_left = 68.0
+margin_right = 132.0
+margin_bottom = 64.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect3" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="2"]
+margin_left = 136.0
+margin_right = 200.0
+margin_bottom = 64.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect4" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="3"]
+margin_left = 204.0
+margin_right = 268.0
+margin_bottom = 64.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect5" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="4"]
+margin_left = 272.0
+margin_right = 336.0
+margin_bottom = 64.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect6" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="5"]
+margin_top = 68.0
+margin_right = 64.0
+margin_bottom = 132.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect7" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="6"]
+margin_left = 68.0
+margin_top = 68.0
+margin_right = 132.0
+margin_bottom = 132.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect8" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="7"]
+margin_left = 136.0
+margin_top = 68.0
+margin_right = 200.0
+margin_bottom = 132.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect9" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="8"]
+margin_left = 204.0
+margin_top = 68.0
+margin_right = 268.0
+margin_bottom = 132.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect10" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="9"]
+margin_left = 272.0
+margin_top = 68.0
+margin_right = 336.0
+margin_bottom = 132.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect11" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="10"]
+margin_top = 136.0
+margin_right = 64.0
+margin_bottom = 200.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect12" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="11"]
+margin_left = 68.0
+margin_top = 136.0
+margin_right = 132.0
+margin_bottom = 200.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect13" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="12"]
+margin_left = 136.0
+margin_top = 136.0
+margin_right = 200.0
+margin_bottom = 200.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect14" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="13"]
+margin_left = 204.0
+margin_top = 136.0
+margin_right = 268.0
+margin_bottom = 200.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="TextureRect15" type="TextureRect" parent="Backpack/InvMask/InventoryGridContainer" index="14"]
+margin_left = 272.0
+margin_top = 136.0
+margin_right = 336.0
+margin_bottom = 200.0
+rect_min_size = Vector2( 64, 64 )
+texture = ExtResource( 3 )
+expand = true
+stretch_mode = 1
+
+[node name="Tween" type="Tween" parent="." index="2"]
+[connection signal="input_event" from="Backpack/Skeleton/Plane/StaticBody" to="." method="_on_StaticBody_input_event"]

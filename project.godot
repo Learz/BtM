@@ -9,6 +9,16 @@
 config_version=4
 
 _global_script_classes=[ {
+"base": "Area",
+"class": "CamArea",
+"language": "GDScript",
+"path": "res://CamArea.gd"
+}, {
+"base": "KinematicBody",
+"class": "Character",
+"language": "GDScript",
+"path": "res://Assets/Test/Char.gd"
+}, {
 "base": "ResourceFormatLoader",
 "class": "HTerrainDataLoader",
 "language": "GDScript",
@@ -18,10 +28,18 @@ _global_script_classes=[ {
 "class": "HTerrainDataSaver",
 "language": "GDScript",
 "path": "res://addons/zylann.hterrain/hterrain_resource_saver.gd"
+}, {
+"base": "Spatial",
+"class": "TsaCube",
+"language": "GDScript",
+"path": "res://Assets/Test/TsaCube.gd"
 } ]
 _global_script_class_icons={
+"CamArea": "",
+"Character": "",
 "HTerrainDataLoader": "",
-"HTerrainDataSaver": ""
+"HTerrainDataSaver": "",
+"TsaCube": ""
 }
 
 [application]
@@ -29,6 +47,18 @@ _global_script_class_icons={
 config/name="Between the Mountains"
 run/main_scene="res://Map.tscn"
 config/icon="res://icon.png"
+
+[autoload]
+
+Global="*res://Global.tscn"
+
+[display]
+
+window/size/width=450
+window/size/height=800
+window/handheld/orientation="portrait"
+window/stretch/mode="viewport"
+window/stretch/aspect="expand"
 
 [editor_plugins]
 

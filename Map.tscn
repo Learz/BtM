@@ -1,4 +1,4 @@
-[gd_scene load_steps=14 format=2]
+[gd_scene load_steps=25 format=2]
 
 [ext_resource path="res://default_env.tres" type="Environment" id=1]
 [ext_resource path="res://Assets/Test/TsaCube.tscn" type="PackedScene" id=2]
@@ -10,8 +10,226 @@
 [ext_resource path="res://Assets/Test/Char.tscn" type="PackedScene" id=8]
 [ext_resource path="res://Assets/Test/Tree.tscn" type="PackedScene" id=9]
 [ext_resource path="res://addons/zylann.scatter/scatter3d.gd" type="Script" id=10]
+[ext_resource path="res://InputHandler.gd" type="Script" id=11]
+[ext_resource path="res://Assets/Test/shadow.png" type="Texture" id=12]
+[ext_resource path="res://Assets/Test/Camera.gd" type="Script" id=13]
+[ext_resource path="res://Assets/Test/WaterLevel.gd" type="Script" id=14]
+[ext_resource path="res://Assets/Test/backpack.tscn" type="PackedScene" id=15]
+[ext_resource path="res://Assets/Test/displacement.png" type="Texture" id=16]
+[ext_resource path="res://Assets/Test/CamArea.tscn" type="PackedScene" id=17]
 
-[sub_resource type="GDScript" id=1]
+[sub_resource type="PlaneMesh" id=1]
+size = Vector2( 500, 500 )
+
+[sub_resource type="Shader" id=2]
+code = "shader_type spatial;
+render_mode unshaded;
+ 
+uniform vec4 main_color : hint_color;
+uniform vec4 intersection_color : hint_color;
+uniform float intersection_max_threshold = 0.5;
+uniform sampler2D displ_tex : hint_white;
+uniform float displ_amount = 0.6;
+uniform float near = 0.15;
+uniform float far = 300.0;
+ 
+float linearize(float c_depth) {
+	c_depth = 2.0 * c_depth - 1.0;
+	return near * far / (far + c_depth * (near - far));
+}
+ 
+void fragment()
+{
+	float zdepth = linearize(texture(DEPTH_TEXTURE, SCREEN_UV).x);
+	float zpos = linearize(FRAGCOORD.z);
+	float diff = zdepth - zpos;
+ 
+	vec2 displ = texture(displ_tex, UV - TIME / 30.0).rg;
+	displ = ((displ * 2.0) - 1.0) * displ_amount;
+	diff += displ.x;
+ 
+	vec4 col = mix(intersection_color, main_color, step(intersection_max_threshold, diff));
+	ALBEDO = col.rgb;
+ 
+}
+"
+
+[sub_resource type="ShaderMaterial" id=3]
+shader = SubResource( 2 )
+shader_param/main_color = Color( 0.207843, 0.772549, 0.960784, 1 )
+shader_param/intersection_color = Color( 1, 1, 1, 1 )
+shader_param/intersection_max_threshold = 1.0
+shader_param/displ_amount = 1.0
+shader_param/near = 0.15
+shader_param/far = 300.0
+shader_param/displ_tex = ExtResource( 16 )
+
+[sub_resource type="Shader" id=4]
+code = "shader_type spatial;
+
+// This is a shader with less textures, in case the main one doesn't run on your GPU.
+// It's mostly a big copy/paste, because Godot doesn't support #include or #ifdef...
+
+uniform sampler2D u_terrain_heightmap;
+uniform sampler2D u_terrain_normalmap;
+uniform sampler2D u_terrain_colormap : hint_albedo;
+uniform sampler2D u_terrain_splatmap;
+uniform mat4 u_terrain_inverse_transform;
+uniform mat3 u_terrain_normal_basis;
+
+uniform sampler2D u_ground_albedo_bump_0 : hint_albedo;
+uniform sampler2D u_ground_albedo_bump_1 : hint_albedo;
+uniform sampler2D u_ground_albedo_bump_2 : hint_albedo;
+uniform sampler2D u_ground_albedo_bump_3 : hint_albedo;
+
+uniform float u_ground_uv_scale = 20.0;
+uniform bool u_depth_blending = true;
+uniform bool u_triplanar = false;
+
+varying vec4 v_tint;
+varying vec4 v_splat;
+varying vec3 v_ground_uv;
+
+
+vec3 unpack_normal(vec4 rgba) {
+	return rgba.xzy * 2.0 - vec3(1.0);
+}
+
+// Blends weights according to the bump of detail textures,
+// so for example it allows to have sand fill the gaps between pebbles
+vec4 get_depth_blended_weights(vec4 splat, vec4 bumps) {
+	float dh = 0.2;
+
+	vec4 h = bumps + splat;
+	
+	// TODO Keep improving multilayer blending, there are still some edge cases...
+	// Mitigation: nullify layers with near-zero splat
+	h *= smoothstep(0, 0.05, splat);
+	
+	vec4 d = h + dh;
+	d.r -= max(h.g, max(h.b, h.a));
+	d.g -= max(h.r, max(h.b, h.a));
+	d.b -= max(h.g, max(h.r, h.a));
+	d.a -= max(h.g, max(h.b, h.r));
+	
+	return clamp(d, 0, 1);
+}
+
+vec3 get_triplanar_blend(vec3 world_normal) {
+	vec3 blending = abs(world_normal);
+	blending = normalize(max(blending, vec3(0.00001))); // Force weights to sum to 1.0
+	float b = blending.x + blending.y + blending.z;
+	return blending / vec3(b, b, b);
+}
+
+vec4 texture_triplanar(sampler2D tex, vec3 world_pos, vec3 blend) {
+	vec4 xaxis = texture(tex, world_pos.yz);
+	vec4 yaxis = texture(tex, world_pos.xz);
+	vec4 zaxis = texture(tex, world_pos.xy);
+	// blend the results of the 3 planar projections.
+	return xaxis * blend.x + yaxis * blend.y + zaxis * blend.z;
+}
+
+void vertex() {
+	vec2 cell_coords = (u_terrain_inverse_transform * WORLD_MATRIX * vec4(VERTEX, 1)).xz;
+	// Must add a half-offset so that we sample the center of pixels,
+	// otherwise bilinear filtering of the textures will give us mixed results.
+	cell_coords += vec2(0.5);
+
+	// Normalized UV
+	UV = cell_coords / vec2(textureSize(u_terrain_heightmap, 0));
+	
+	// Height displacement
+	float h = texture(u_terrain_heightmap, UV).r;
+	VERTEX.y = h;
+
+	v_ground_uv = vec3(cell_coords.x, h * WORLD_MATRIX[1][1], cell_coords.y) / u_ground_uv_scale;
+	
+	// Putting this in vertex saves 2 fetches from the fragment shader,
+	// which is good for performance at a negligible quality cost,
+	// provided that geometry is a regular grid that decimates with LOD.
+	// (downside is LOD will also decimate tint and splat, but it's not bad overall)
+	v_tint = texture(u_terrain_colormap, UV);
+	v_splat = texture(u_terrain_splatmap, UV);
+	
+	// Need to use u_terrain_normal_basis to handle scaling.
+	// For some reason I also had to invert Z when sampling terrain normals... not sure why
+	NORMAL = u_terrain_normal_basis * (unpack_normal(texture(u_terrain_normalmap, UV)) * vec3(1,1,-1));
+}
+
+void fragment() {
+	if (v_tint.a < 0.5) {
+		// TODO Add option to use vertex discarding instead, using NaNs
+		discard;
+	}
+	
+	vec3 terrain_normal_world = 
+		u_terrain_normal_basis * (unpack_normal(texture(u_terrain_normalmap, UV)) * vec3(1, 1, -1));
+	terrain_normal_world = normalize(terrain_normal_world);
+
+	// TODO Detail should only be rasterized on nearby chunks (needs proximity management to switch shaders)
+	
+	vec2 ground_uv = v_ground_uv.xz;
+	
+	vec4 ab3;
+	if (u_triplanar) {
+		// Only do triplanar on one texture slot,
+		// because otherwise it would be very expensive and cost many more ifs.
+		// I chose the last slot because first slot is the default on new splatmaps,
+		// and that's a feature used for cliffs, which are usually designed later.
+
+		vec3 blending = get_triplanar_blend(terrain_normal_world);
+
+		ab3 = texture_triplanar(u_ground_albedo_bump_3, v_ground_uv, blending);
+
+	} else {
+		ab3 = texture(u_ground_albedo_bump_3, ground_uv);
+	}
+
+	vec4 ab0 = texture(u_ground_albedo_bump_0, ground_uv);
+	vec4 ab1 = texture(u_ground_albedo_bump_1, ground_uv);
+	vec4 ab2 = texture(u_ground_albedo_bump_2, ground_uv);
+	
+	vec3 col0 = ab0.rgb;
+	vec3 col1 = ab1.rgb;
+	vec3 col2 = ab2.rgb;
+	vec3 col3 = ab3.rgb;
+	
+	vec4 w;
+	// TODO An #ifdef macro would be nice! Or copy/paste everything in a different shader...
+	if (u_depth_blending) {
+		w = get_depth_blended_weights(v_splat, vec4(ab0.a, ab1.a, ab2.a, ab3.a));
+	} else {
+		w = v_splat.rgba;
+	}
+	
+	float w_sum = (w.r + w.g + w.b + w.a);
+	
+	ALBEDO = v_tint.rgb * (
+		w.r * col0.rgb + 
+		w.g * col1.rgb + 
+		w.b * col2.rgb + 
+		w.a * col3.rgb) / w_sum;
+	
+	ROUGHNESS = 1.0;
+	
+	NORMAL = (INV_CAMERA_MATRIX * (vec4(terrain_normal_world, 0.0))).xyz;
+
+	//ALBEDO = w.rgb;
+	//ALBEDO = v_ground_uv.xyz;
+}"
+
+[sub_resource type="DynamicFontData" id=5]
+font_path = "res://Assets/Test/Roboto-Medium.ttf"
+
+[sub_resource type="DynamicFont" id=6]
+size = 64
+outline_size = 2
+outline_color = Color( 0, 0, 0, 1 )
+use_filter = true
+font_data = SubResource( 5 )
+
+[sub_resource type="GDScript" id=7]
 script/source = "extends Label
 
 
@@ -30,105 +248,66 @@ func _process(delta):
 	set_text(str(Engine.get_frames_per_second()))
 "
 
-[sub_resource type="GDScript" id=2]
-script/source = "extends Spatial
-
-
-# Declare member variables here. Examples:
-# var a = 2
-# var b = \"text\"
-
-
-# Called when the node enters the scene tree for the first time.
-func _ready():
-	pass # Replace with function body.
-
-
-func _process(delta):
-#	rotation = Vector3(0,sin(OS.get_ticks_msec()/800.0),0)
-#	rotate(Vector3(0,1,0), sin(OS.get_ticks_msec()/500)*delta)
-	pass
-"
-
-[sub_resource type="PlaneMesh" id=3]
-size = Vector2( 200, 200 )
-
 [node name="Spatial" type="Spatial"]
 
-[node name="Debug" type="Node" parent="."]
+[node name="TsaCube" parent="." instance=ExtResource( 2 )]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -4.01148, 6.48052, 7.14925 )
 
-[node name="FPSDisplay" type="Label" parent="Debug"]
-margin_left = 5.0
-margin_top = 5.0
-margin_right = 40.0
-margin_bottom = 19.0
-custom_colors/font_color = Color( 0, 1, 0, 1 )
-custom_colors/font_color_shadow = Color( 0, 0, 0, 1 )
-text = "FPS"
-script = SubResource( 1 )
+[node name="TsaCube2" parent="." instance=ExtResource( 2 )]
+transform = Transform( 19.7739, 0, 0, 0, 1, 0, 0, 0, 5.05845, -43.7283, 4.18553, -14.5838 )
+
+[node name="3DViewportContainer" type="ViewportContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+stretch = true
 __meta__ = {
 "_edit_use_anchors_": false
 }
 
-[node name="Rotator" type="Spatial" parent="."]
-script = SubResource( 2 )
+[node name="Game" type="Viewport" parent="3DViewportContainer"]
+size = Vector2( 450, 800 )
+handle_input_locally = false
+hdr = false
+render_target_update_mode = 3
 
-[node name="char" parent="." instance=ExtResource( 8 )]
-transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -8.84614, 0.112945, -0.321283 )
+[node name="WaterLevel" type="MeshInstance" parent="3DViewportContainer/Game"]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -8.846, 3.11718, 0.688848 )
+mesh = SubResource( 1 )
+material/0 = SubResource( 3 )
+script = ExtResource( 14 )
 
-[node name="WaterLevel" type="MeshInstance" parent="char"]
-transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -5, 0 )
-mesh = SubResource( 3 )
-material/0 = null
-
-[node name="Camera" type="Camera" parent="char"]
-transform = Transform( 1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 35, 30 )
-cull_mask = 1048573
-environment = ExtResource( 1 )
-fov = 30.0
-size = 10.0
-
-[node name="PlayerCam" type="Camera" parent="char"]
-transform = Transform( 1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 35, 30 )
-environment = ExtResource( 1 )
-current = true
-fov = 30.0
-size = 10.0
-
-[node name="DirectionalLight" type="DirectionalLight" parent="."]
-transform = Transform( 0.480193, -0.384014, 0.788637, 0, 0.899077, 0.437791, -0.877163, -0.210224, 0.43173, 7.59194, 5.0574, 1.20581 )
+[node name="DirectionalLight" type="DirectionalLight" parent="3DViewportContainer/Game"]
+transform = Transform( 0.480193, -0.384014, 0.788637, 0, 0.899077, 0.437791, -0.877163, -0.210224, 0.43173, 7.59194, 10.6983, 1.20581 )
 light_energy = 0.5
 
-[node name="TsaCube" parent="." instance=ExtResource( 3 )]
-transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 2.03548, 1, 2.67413 )
+[node name="TsaCube" parent="3DViewportContainer/Game" instance=ExtResource( 3 )]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 2.03548, 6.64092, 2.67413 )
 
-[node name="TsaCube2" parent="." instance=ExtResource( 3 )]
-transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -2.06777, 1, -2.63546 )
+[node name="TsaCube2" parent="3DViewportContainer/Game" instance=ExtResource( 3 )]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -2.06777, 6.64092, -2.63546 )
 
-[node name="TsoCube" parent="." instance=ExtResource( 4 )]
-transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 3.45598, 1, 0 )
+[node name="TsoCube" parent="3DViewportContainer/Game" instance=ExtResource( 4 )]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 3.45598, 6.64092, 0 )
 
-[node name="TsoCube2" parent="." instance=ExtResource( 4 )]
-transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -1.709, 1, 2.73886 )
+[node name="TsoCube2" parent="3DViewportContainer/Game" instance=ExtResource( 4 )]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -1.709, 6.64092, 2.73886 )
 
-[node name="TsiCube" parent="." instance=ExtResource( 5 )]
-transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -4.01028, 1, 0 )
+[node name="TsiCube" parent="3DViewportContainer/Game" instance=ExtResource( 5 )]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -4.01028, 6.64092, 0 )
 
-[node name="TsiCube2" parent="." instance=ExtResource( 5 )]
-transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 1.80987, 1, -2.72062 )
+[node name="TsiCube2" parent="3DViewportContainer/Game" instance=ExtResource( 5 )]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 1.80987, 6.64092, -2.72062 )
 
-[node name="HTerrain" type="Spatial" parent="."]
-transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -256, 0, -256 )
+[node name="HTerrain" type="Spatial" parent="3DViewportContainer/Game"]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -256, 5.64092, -256 )
 script = ExtResource( 7 )
-collision_enabled = true
-ambient_wind = 0.0
-lod_scale = 2.0
-custom_globalmap_shader = null
-map_scale = Vector3( 1, 1, 1 )
 _terrain_data = ExtResource( 6 )
 chunk_size = 32
 shader_type = "Classic4Lite"
-custom_shader = null
+custom_shader = SubResource( 4 )
 shader_params/u_ground_uv_scale = 20
 shader_params/u_depth_blending = true
 shader_params/u_triplanar = false
@@ -141,89 +320,200 @@ ground/normal_roughness_2 = null
 ground/albedo_bump_3 = null
 ground/normal_roughness_3 = null
 
-[node name="Scatter3D" type="Spatial" parent="."]
+[node name="Scatter3D" type="Spatial" parent="3DViewportContainer/Game"]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 5.64092, 0 )
 script = ExtResource( 10 )
 _scenes = [ ExtResource( 9 ) ]
 
-[node name="Tree" parent="Scatter3D" instance=ExtResource( 9 )]
-transform = Transform( -1.05184, 0, -1.70107, 0, 2, 0, 1.70107, 0, -1.05184, -16.0099, 0, 8.52411 )
+[node name="Tree" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
+transform = Transform( -1.05184, 0, -1.70107, 0, 2, 0, 1.70107, 0, -1.05184, -8.31498, 0, 15.773 )
 
-[node name="Tree4" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree4" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( -1.99878, 0, 0.0698413, 0, 2, 0, -0.0698413, 0, -1.99878, 6.22025, 0, 13.1312 )
 
-[node name="Tree3" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree3" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( -0.346212, 0, -1.96981, 0, 2, 0, 1.96981, 0, -0.346212, 23.5856, -1.90735e-06, -14.6463 )
 
-[node name="Tree5" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree5" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( -1.01237, 0, 1.72485, 0, 2, 0, -1.72485, 0, -1.01237, 23.5926, -1.90735e-06, 4.03907 )
 
-[node name="Tree6" parent="Scatter3D" instance=ExtResource( 9 )]
-transform = Transform( 0.163504, 0, 1.99331, 0, 2, 0, -1.99331, 0, 0.163504, -21.036, -0.00337219, -13.5933 )
+[node name="Tree6" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
+transform = Transform( 0.163504, 0, 1.99331, 0, 2, 0, -1.99331, 0, 0.163504, -20.3838, -0.00337219, -21.5438 )
 
-[node name="Tree7" parent="Scatter3D" instance=ExtResource( 9 )]
-transform = Transform( 1.99954, 0, -0.0429234, 0, 2, 0, 0.0429234, 0, 1.99954, -7.89169, 0, -27.4525 )
-
-[node name="Tree8" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree8" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( -1.92559, 0, -0.540455, 0, 2, 0, 0.540455, 0, -1.92559, 14.9534, 0, -7.68558 )
 
-[node name="Tree9" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree9" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( -0.13435, 0, 1.99548, 0, 2, 0, -1.99548, 0, -0.13435, -19.3366, -0.00415611, 19.1304 )
 
-[node name="Tree10" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree10" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( 0.136434, 0, -1.99534, 0, 2, 0, 1.99534, 0, 0.136434, 20.3518, 0, 12.6041 )
 
-[node name="Tree11" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree11" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 
-[node name="Tree2" parent="Scatter3D" instance=ExtResource( 9 )]
-transform = Transform( 1.55935, 0, -1.25236, 0, 2, 0, 1.25236, 0, 1.55935, 1.58693, -1.90735e-06, -31.1965 )
+[node name="Tree2" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
+transform = Transform( 1.55935, 0, -1.25236, 0, 2, 0, 1.25236, 0, 1.55935, -21.2779, -1.90735e-06, -5.27347 )
 
-[node name="Tree12" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree12" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( 1.89939, 0, 0.626365, 0, 2, 0, -0.626365, 0, 1.89939, 11.3753, -3.8147e-06, -25.1766 )
 
-[node name="Tree13" parent="Scatter3D" instance=ExtResource( 9 )]
-transform = Transform( 1.74278, 0, -0.981182, 0, 2, 0, 0.981182, 0, 1.74278, -59.0207, -2.86527, -19.1763 )
+[node name="Tree13" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
+transform = Transform( 1.74278, 0, -0.981182, 0, 2, 0, 0.981182, 0, 1.74278, -67.86, -0.0911431, -22.2795 )
 
-[node name="Tree14" parent="Scatter3D" instance=ExtResource( 9 )]
-transform = Transform( 1.31378, 0, 1.50797, 0, 2, 0, -1.50797, 0, 1.31378, -57.9957, -3.76853, -7.93677 )
+[node name="Tree14" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
+transform = Transform( 1.31378, 0, 1.50797, 0, 2, 0, -1.50797, 0, 1.31378, -80.8196, -0.120306, 2.10517 )
 
-[node name="Tree15" parent="Scatter3D" instance=ExtResource( 9 )]
-transform = Transform( -0.56211, 0, 1.91938, 0, 2, 0, -1.91938, 0, -0.56211, -57.671, -2.7726, 10.6225 )
+[node name="Tree15" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
+transform = Transform( -0.56211, 0, 1.91938, 0, 2, 0, -1.91938, 0, -0.56211, -68.372, -0.317612, 10.6225 )
 
-[node name="Tree16" parent="Scatter3D" instance=ExtResource( 9 )]
-transform = Transform( -1.97822, 0, -0.294371, 0, 2, 0, 0.294371, 0, -1.97822, -52.3145, -3.67595, 36.3365 )
+[node name="Tree16" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
+transform = Transform( -1.97822, 0, -0.294371, 0, 2, 0, 0.294371, 0, -1.97822, -59.8216, -0.188568, 36.3365 )
 
-[node name="Tree17" parent="Scatter3D" instance=ExtResource( 9 )]
-transform = Transform( -0.779212, 0, 1.84196, 0, 2, 0, -1.84196, 0, -0.779212, -56.2128, -2.43726, 24.2142 )
+[node name="Tree17" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
+transform = Transform( -0.779212, 0, 1.84196, 0, 2, 0, -1.84196, 0, -0.779212, -66.9138, 0.0177274, 24.2142 )
 
-[node name="Tree18" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree18" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( -1.91407, 0, 0.579952, 0, 2, 0, -0.579952, 0, -1.91407, -61.2582, -0.0746994, -38.0883 )
 
-[node name="Tree19" parent="Scatter3D" instance=ExtResource( 9 )]
-transform = Transform( 0.103446, 0, 1.99732, 0, 2, 0, -1.99732, 0, 0.103446, -68.5105, -0.0017128, -3.21175 )
+[node name="Tree19" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
+transform = Transform( 0.103446, 0, 1.99732, 0, 2, 0, -1.99732, 0, 0.103446, -66.6629, -0.0017128, -6.45509 )
 
-[node name="Tree20" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree20" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( 0.666213, 0, 1.88578, 0, 2, 0, -1.88578, 0, 0.666213, -1.78963, 0, -58.7827 )
 
-[node name="Tree21" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree21" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( 1.85477, 0, 0.748212, 0, 2, 0, -0.748212, 0, 1.85477, 21.1905, 0, -46.0812 )
 
-[node name="Tree22" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree22" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( 1.81607, 0, -0.837794, 0, 2, 0, 0.837794, 0, 1.81607, 35.7744, -3.8147e-06, -20.0192 )
 
-[node name="Tree23" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree23" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( 1.92441, 0, -0.544648, 0, 2, 0, 0.544648, 0, 1.92441, 35.3961, 0, 12.8662 )
 
-[node name="Tree24" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree24" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( -1.47495, 0, -1.35075, 0, 2, 0, 1.35075, 0, -1.47495, 17.3265, 0, 29.5041 )
 
-[node name="Tree25" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree25" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( -1.46658, 0, -1.35984, 0, 2, 0, 1.35984, 0, -1.46658, -2.88934, -3.8147e-06, 31.9071 )
 
-[node name="Tree26" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree26" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( -0.0757993, 0, 1.99856, 0, 2, 0, -1.99856, 0, -0.0757993, 6.90131, 0, 28.2523 )
 
-[node name="Tree27" parent="Scatter3D" instance=ExtResource( 9 )]
+[node name="Tree27" parent="3DViewportContainer/Game/Scatter3D" instance=ExtResource( 9 )]
 transform = Transform( 0.763218, 0, -1.84865, 0, 2, 0, 1.84865, 0, 0.763218, -51.3825, -1.04271, -54.1414 )
 
-[node name="TsaCube3" parent="." instance=ExtResource( 2 )]
-transform = Transform( 0.258819, -9.65926, 0, 0.965926, 2.58819, 0, 0, 0, 10, -12.8146, -0.440087, 0.487248 )
+[node name="TsaCube3" parent="3DViewportContainer/Game" instance=ExtResource( 2 )]
+transform = Transform( 1.6816, -2.23264, 0, 0.657252, 5.71226, 0, 0, 0, -1.98463, -43.2883, 4.03831, 4.97451 )
+
+[node name="char" parent="3DViewportContainer/Game" instance=ExtResource( 8 )]
+transform = Transform( 1, 0, 0, 0, 1, 0, 0, 0, 1, -9.61, 5.75, -0.321 )
+collision_layer = 3
+collision_mask = 3
+
+[node name="CamPoint" type="Spatial" parent="3DViewportContainer/Game/char"]
+
+[node name="PlayerCam" type="Camera" parent="3DViewportContainer/Game/char/CamPoint"]
+transform = Transform( 1, 0, 0, 0, 0.707107, 0.707107, 0, -0.707107, 0.707107, 0, 35, 30 )
+environment = ExtResource( 1 )
+current = true
+fov = 30.0
+size = 10.0
+far = 500.0
+script = ExtResource( 13 )
+
+[node name="CamArea" parent="3DViewportContainer/Game" instance=ExtResource( 17 )]
+transform = Transform( 20, 0, 0, 0, 5, 0, 0, 0, 10, -45.4278, 5.81137, -15.6127 )
+
+[node name="InputHandler" type="Control" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+focus_mode = 2
+mouse_filter = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource( 11 )
+__meta__ = {
+"_edit_use_anchors_": false
+}
+
+[node name="TouchFeedback" type="TextureRect" parent="InputHandler"]
+modulate = Color( 1, 1, 1, 0.392157 )
+margin_left = -64.0
+margin_top = -64.0
+margin_right = 64.0
+margin_bottom = 64.0
+mouse_filter = 2
+texture = ExtResource( 12 )
+expand = true
+__meta__ = {
+"_edit_use_anchors_": false
+}
+
+[node name="TouchFeedbackOrigin" type="TextureRect" parent="InputHandler"]
+modulate = Color( 1, 1, 1, 0.392157 )
+margin_left = -64.0
+margin_top = -64.0
+margin_right = 64.0
+margin_bottom = 64.0
+mouse_filter = 2
+texture = ExtResource( 12 )
+expand = true
+__meta__ = {
+"_edit_use_anchors_": false
+}
+
+[node name="Debug" type="Control" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2
+__meta__ = {
+"_edit_use_anchors_": false
+}
+
+[node name="FPSDisplay" type="Label" parent="Debug"]
+margin_left = 20.0
+margin_top = 20.0
+margin_right = 40.0
+margin_bottom = 19.0
+custom_fonts/font = SubResource( 6 )
+custom_colors/font_color = Color( 0, 1, 0, 1 )
+text = "FPS"
+script = SubResource( 7 )
+__meta__ = {
+"_edit_use_anchors_": false
+}
+
+[node name="UIViewPortContainer" type="ViewportContainer" parent="."]
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+stretch = true
+__meta__ = {
+"_edit_use_anchors_": false
+}
+
+[node name="Viewport" type="Viewport" parent="UIViewPortContainer"]
+size = Vector2( 450, 800 )
+transparent_bg = true
+handle_input_locally = false
+render_target_update_mode = 3
+
+[node name="backpack" parent="UIViewPortContainer/Viewport" instance=ExtResource( 15 )]
+transform = Transform( -1, -3.25841e-07, -5.30863e-14, 0, -1.62921e-07, 1, -3.25841e-07, 1, 1.62921e-07, 0, 110, -1.05 )
+
+[node name="Camera" type="Camera" parent="UIViewPortContainer/Viewport"]
+transform = Transform( 1, 0, 0, 0, -1.62921e-07, -1, 0, 1, -1.62921e-07, 0, 100, 0 )
+projection = 1
+fov = 7.5
+size = 1.2
+script = ExtResource( 13 )
+
+[node name="TsaCube" parent="UIViewPortContainer/Viewport" instance=ExtResource( 2 )]
+transform = Transform( 0.0906308, -0.0422618, -5.93104e-08, 0.0383022, 0.0821394, -0.422618, 0.0178606, 0.0383022, 0.906308, -0.5, 110, -1.717 )
+visible = false
+
+[node name="TsaCube2" parent="UIViewPortContainer/Viewport" instance=ExtResource( 2 )]
+transform = Transform( 0.0906308, 0.0422618, 5.93104e-08, -0.0383022, 0.0821394, -0.422618, -0.0178606, 0.0383022, 0.906308, 0.5, 110, -1.717 )
+visible = false
