@@ -46,7 +46,8 @@ _global_script_class_icons={
 
 config/name="Between the Mountains"
 run/main_scene="res://Map.tscn"
-config/icon="res://icon.png"
+config/icon="res://window_icon.png"
+config/windows_native_icon="res://icon.ico"
 
 [autoload]
 
